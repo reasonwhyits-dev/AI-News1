@@ -1,52 +1,656 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>AI News</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pulse — AI News</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <!-- ============================================================
+    CONFIGURATION — set before deploying to GitHub Pages
+    ============================================================
+    SUPABASE_URL      → your project URL from Supabase dashboard
+    SUPABASE_ANON_KEY → public anon key (safe to expose in frontend)
+    SUPABASE_TABLE    → table name where n8n stores articles
+    SUPABASE_ORDER    → column used for sorting (desc)
+    SUPABASE_LIMIT    → max rows to fetch per load
+  ============================================================ -->
+  <script>
+    const SUPABASE_URL     = 'https://YOUR_PROJECT.supabase.co';
+    const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+    const SUPABASE_TABLE   = 'ai_news';
+    const SUPABASE_ORDER   = 'published_at';
+    const SUPABASE_LIMIT   = 30;
+  </script>
+
   <style>
-    body { font-family: Arial; background:#f5f5f5; }
-    .card {
-      background:white;
-      padding:15px;
-      margin:15px;
-      border-radius:10px;
-      box-shadow:0 2px 5px rgba(0,0,0,0.1);
+    :root {
+      --ink:     #0d0d0d;
+      --paper:   #f5f2eb;
+      --accent:  #c8382a;
+      --muted:   #7a7468;
+      --line:    #d8d4cb;
+      --card-bg: #ffffff;
+      --tag-bg:  #ede9e0;
     }
-    img { width:100%; border-radius:10px; }
-    a { text-decoration:none; color:black; font-weight:bold; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: var(--paper); color: var(--ink); min-height: 100vh; }
+
+    /* LOADING */
+    .loading-screen {
+      position: fixed; inset: 0; background: var(--paper);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 999; gap: 16px; transition: opacity 0.4s ease;
+    }
+    .loading-screen.hidden { opacity: 0; pointer-events: none; }
+    .spinner {
+      width: 36px; height: 36px; border: 3px solid var(--line);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-screen p { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+    /* ERROR BANNER */
+    .error-banner {
+      display: none; background: #fff3f3; border-bottom: 1px solid #f5c2c2;
+      color: #8b1a1a; padding: 10px 40px; font-size: 13px; text-align: center;
+    }
+    .error-banner.show { display: block; }
+
+    /* HEADER */
+    header {
+      border-bottom: 3px double var(--ink); padding: 16px 40px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; background: var(--paper); z-index: 100;
+    }
+    .logo { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 900; letter-spacing: -1px; }
+    .logo span { color: var(--accent); }
+    .date-line { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    nav { display: flex; gap: 20px; align-items: center; }
+    nav a {
+      text-decoration: none; font-size: 13px; font-weight: 500; color: var(--ink);
+      letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.55; transition: opacity 0.2s;
+    }
+    nav a:hover, nav a.active { opacity: 1; }
+    nav a.active { border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+
+    /* refresh */
+    .refresh-btn {
+      display: flex; align-items: center; gap: 5px; border: 1px solid var(--line);
+      background: transparent; cursor: pointer; font-family: 'DM Sans', sans-serif;
+      font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 5px 11px; border-radius: 20px; transition: all 0.2s;
+    }
+    .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .refresh-btn.spinning svg { animation: spin 0.7s linear infinite; }
+
+    /* live pill */
+    .live-pill {
+      display: none; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--muted);
+      padding: 4px 10px; border: 1px solid var(--line); border-radius: 20px;
+    }
+    .live-dot {
+      width: 7px; height: 7px; background: #22c55e; border-radius: 50%;
+      animation: pulse-dot 2s ease infinite; flex-shrink: 0;
+    }
+    @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+    /* HERO */
+    .hero {
+      max-width: 1100px; margin: 0 auto; padding: 40px 40px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-feature { cursor: pointer; display: flex; flex-direction: column; gap: 14px; }
+    .hero-feature img {
+      width: 100%; aspect-ratio: 16/9; object-fit: cover;
+      border-radius: 4px; background: var(--tag-bg);
+      transition: transform 0.4s ease;
+    }
+    .hero-feature:hover img { transform: scale(1.01); }
+    .hero-feature .tag {
+      display: inline-block; background: var(--accent); color: #fff;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; padding: 3px 8px; border-radius: 2px;
+    }
+    .hero-feature h2 { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 700; line-height: 1.25; }
+    .hero-feature p { font-size: 15px; color: var(--muted); line-height: 1.65; }
+    .hero-feature .meta { font-size: 12px; color: var(--muted); }
+    .hero-sidebar { display: flex; flex-direction: column; border-left: 1px solid var(--line); padding-left: 32px; }
+    .side-item {
+      padding: 16px 0; border-bottom: 1px solid var(--line); cursor: pointer;
+      display: flex; gap: 14px; align-items: flex-start; transition: opacity 0.2s;
+    }
+    .side-item:last-child { border-bottom: none; }
+    .side-item:hover { opacity: 0.7; }
+    .side-item img {
+      width: 90px; height: 64px; object-fit: cover;
+      border-radius: 3px; flex-shrink: 0; background: var(--tag-bg);
+    }
+    .side-item h3 { font-family: 'Playfair Display', serif; font-size: 16px; font-weight: 700; line-height: 1.3; margin-bottom: 6px; }
+    .side-item .meta { font-size: 12px; color: var(--muted); }
+
+    /* FILTER BAR */
+    .filter-bar {
+      max-width: 1100px; margin: 0 auto; padding: 18px 40px;
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    .filter-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+    .filter-btn {
+      padding: 6px 14px; border-radius: 20px; border: 1px solid var(--line);
+      background: transparent; font-family: 'DM Sans', sans-serif;
+      font-size: 13px; cursor: pointer; transition: all 0.2s; color: var(--ink);
+    }
+    .filter-btn:hover { border-color: var(--ink); }
+    .filter-btn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .results-count { font-size: 12px; color: var(--muted); }
+    .search-wrap { margin-left: auto; position: relative; }
+    .search-wrap input {
+      padding: 7px 14px 7px 34px; border: 1px solid var(--line); border-radius: 20px;
+      font-family: 'DM Sans', sans-serif; font-size: 13px; background: transparent;
+      outline: none; width: 200px; transition: border-color 0.2s, width 0.3s; color: var(--ink);
+    }
+    .search-wrap input:focus { border-color: var(--ink); width: 260px; }
+    .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); opacity: 0.4; pointer-events: none; }
+
+    /* SECTION LABEL */
+    .section-label {
+      max-width: 1100px; margin: 0 auto; padding: 0 40px 16px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .section-label h2 { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 700; white-space: nowrap; }
+    .section-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+    /* GRID */
+    .grid {
+      max-width: 1100px; margin: 0 auto; padding: 0 40px 60px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px;
+    }
+    .card {
+      background: var(--card-bg); border-radius: 6px; overflow: hidden;
+      border: 1px solid var(--line); cursor: pointer;
+      transition: transform 0.25s ease, box-shadow 0.25s ease;
+      display: flex; flex-direction: column;
+      opacity: 0; transform: translateY(20px); animation: fadeUp 0.5s forwards;
+    }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,0.09); }
+    @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+    .card-img-wrap { overflow: hidden; }
+    .card img {
+      width: 100%; aspect-ratio: 16/9; object-fit: cover;
+      display: block; transition: transform 0.4s ease; background: var(--tag-bg);
+    }
+    .card:hover img { transform: scale(1.04); }
+    .card-body { padding: 18px 20px 20px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .card-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+    .card h3 { font-family: 'Playfair Display', serif; font-size: 17px; font-weight: 700; line-height: 1.3; }
+    .card p { font-size: 13.5px; color: var(--muted); line-height: 1.6; flex: 1; }
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--tag-bg);
+    }
+    .card-footer .meta { font-size: 12px; color: var(--muted); }
+    .read-link {
+      font-size: 12px; font-weight: 600; color: var(--ink); text-decoration: none;
+      display: flex; align-items: center; gap: 4px; letter-spacing: 0.04em;
+    }
+    .read-link:hover { color: var(--accent); }
+    .read-link:hover svg { transform: translateX(3px); }
+    .read-link svg { transition: transform 0.2s; }
+    .no-results {
+      grid-column: 1/-1; text-align: center; padding: 60px 20px;
+      color: var(--muted); font-family: 'Playfair Display', serif; font-size: 22px;
+    }
+    .no-results span { display: block; font-family: 'DM Sans', sans-serif; font-size: 14px; margin-top: 8px; }
+
+    /* MODAL */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(13,13,13,0.65); z-index: 200;
+      align-items: center; justify-content: center;
+      padding: 24px; backdrop-filter: blur(4px);
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: var(--paper); max-width: 700px; width: 100%;
+      max-height: 90vh; overflow-y: auto; border-radius: 8px;
+      animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
+    .modal img { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--tag-bg); }
+    .modal-body { padding: 28px 32px 36px; }
+    .modal-body .tag {
+      display: inline-block; background: var(--accent); color: #fff;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; padding: 3px 8px; border-radius: 2px; margin-bottom: 14px;
+    }
+    .modal-body h2 { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 700; line-height: 1.25; margin-bottom: 10px; }
+    .modal-body .meta { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+    .modal-body p { font-size: 15px; line-height: 1.8; color: #333; }
+    .modal-actions { display: flex; gap: 12px; margin-top: 24px; }
+    .btn-primary {
+      padding: 10px 22px; background: var(--ink); color: #fff;
+      text-decoration: none; border-radius: 4px; font-size: 13px;
+      font-weight: 600; letter-spacing: 0.04em; transition: background 0.2s;
+    }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-close {
+      padding: 10px 18px; border: 1px solid var(--line); background: transparent;
+      border-radius: 4px; font-size: 13px; cursor: pointer;
+      font-family: 'DM Sans', sans-serif; transition: border-color 0.2s;
+    }
+    .btn-close:hover { border-color: var(--ink); }
+
+    /* RESPONSIVE */
+    @media (max-width: 860px) {
+      header { padding: 14px 20px; }
+      nav { display: none; }
+      .hero { grid-template-columns: 1fr; padding: 24px 20px; }
+      .hero-sidebar { border-left: none; border-top: 1px solid var(--line); padding-left: 0; padding-top: 20px; }
+      .filter-bar { padding: 14px 20px; }
+      .section-label { padding: 0 20px 14px; }
+      .grid { grid-template-columns: 1fr; padding: 0 20px 40px; }
+      .error-banner { padding: 10px 20px; }
+    }
+    @media (max-width: 520px) {
+      .grid { grid-template-columns: 1fr; }
+      .search-wrap { width: 100%; margin-left: 0; }
+      .search-wrap input { width: 100%; }
+    }
   </style>
 </head>
 <body>
 
-<div id="news"></div>
+<!--
+  ============================================================
+  n8n DATA INJECTION POINT
+  ------------------------------------------------------------
+  In your n8n workflow (Set / Edit Fields node), replace the
+  token  __ARTICLES_JSON__  with your real JSON array:
+
+    Replace:  __ARTICLES_JSON__
+    With:     {{ JSON.stringify($json.articles) }}
+
+  Rules:
+  - Must be a valid JSON array:  [{...}, {...}]
+  - Raw JSON only — no quotes or backticks around it
+  - type="application/json" = browser never executes it,
+    so it is completely safe to inject any JSON content here
+  ============================================================
+-->
+<script type="application/json" id="n8n-data">{[{"id":33,"title":"ASRock Launches Highly Ergonomic Phantom Gaming IPS Monitors With Up To 240 Hz Refresh Rate","summary":"ASRock launches PG27FFS2E/W and PG27FF1A 240Hz IPS gaming monitors with ergonomic features and 1ms response time, plus Challenger CL27FFB and CL25FFB models.","url":"https://wccftech.com/asrock-launches-phantom-gaming-ips-gaming-monitors-pg27ffs2e-pg27ffs1a/","source":"Sarfraz Khan","category":"ai","published_at":"2026-03-23T18:12:53","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://cdn.wccftech.com/wp-content/uploads/2026/03/ASRock-Phantom-Gaming-PG27FFS2E-PG27FFS1A.jpg","article_url":"https://wccftech.com/asrock-launches-phantom-gaming-ips-gaming-monitors-pg27ffs2e-pg27ffs1a/"},{"id":34,"title":"Your iPhone has a secret button on the back - here's how to unlock it","summary":"With a double or triple tap, you can control system features, launch apps, trigger custom shortcuts, and more.","url":"https://www.zdnet.com/article/iphone-back-tap-hidden-button-how-to-use/","source":"@ZDNET","category":"ai","published_at":"2026-03-23T18:01:00","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://www.zdnet.com/a/img/resize/6638687d2653cd57ef026dfddd6d04e894a80d34/2025/09/30/f1b5489d-7f00-43b0-a981-1997bebcfa3b/dsc02952.jpg?auto=webp&fit=crop&height=675&width=1200","article_url":"https://www.zdnet.com/article/iphone-back-tap-hidden-button-how-to-use/"},{"id":35,"title":"Apple's WWDC 2026 Developer Event Is Set for Early June","summary":"The WWDC 2026 developers conference will kick off at Apple Park on June 8.","url":"https://www.cnet.com/tech/services-and-software/apple-wwdc-2026-june/","source":"See full bio","category":"ai","published_at":"2026-03-23T17:54:18","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://www.cnet.com/a/img/resize/63c09e8c2cbdd4394c7611e656fe953753ac95e4/hub/2026/03/23/94a65a4c-4961-44e9-b1cc-d9783b88b572/screenshot-2026-03-23-at-1-28-56pm.png?auto=webp&fit=crop&height=675&width=1200","article_url":"https://www.cnet.com/tech/services-and-software/apple-wwdc-2026-june/"},{"id":36,"title":"An Estimated 1/3 of Nacon's Global Workforce Isn't Getting Paid, as Cyanide, Spiders, and Kylotonn Get Placed Under Receivership","summary":"Following Nacon filing for insolvency, its Cyanide, Spiders, and Kylotonn studios have been placed under receivership.","url":"https://wccftech.com/nacon-cyanide-spiders-kylotonn-reportedly-paused-payments-placed-under-receivership/","source":"David Carcasole","category":"ai","published_at":"2026-03-23T17:49:35","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://cdn.wccftech.com/wp-content/uploads/2026/03/MixCollage-23-Mar-2026-01-39-PM-9293.jpg","article_url":"https://wccftech.com/nacon-cyanide-spiders-kylotonn-reportedly-paused-payments-placed-under-receivership/"},{"id":37,"title":"MPs urge UK government to halt contract giving Palantir FCA data access","summary":"Awarding US spy-tech company deal involving sensitive financial data is ‘huge error of judgment’, Liberal Democrats say","url":"https://www.theguardian.com/technology/2026/mar/23/mps-urge-uk-government-halt-palantir-contract-fca","source":"Robert Booth","category":"ai","published_at":"2026-03-23T17:42:49","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://i.guim.co.uk/img/media/d900a83e0ec6b75557d5e66756882025241e0284/500_0_5000_4000/master/5000.jpg?width=1200&height=630&quality=85&auto=format&fit=crop&precrop=40:21,offset-x50,offset-y0&overlay-align=bottom%2Cleft&overlay-width=100p&overlay-base64=L2ltZy9zdGF0aWMvb3ZlcmxheXMvdGctZGVmYXVsdC5wbmc&s=95dbd623e5acd0e2aa947f807919e5bc","article_url":"https://www.theguardian.com/technology/2026/mar/23/mps-urge-uk-government-halt-palantir-contract-fca"},{"id":38,"title":"Dragon's Dogma II Fans Believe CAPCOM Is Teasing an Expansion","summary":"The second anniversary of the release of Dragon's Dogma II brought a celebratory artwork that fans believe might be teasing an expansion/DLC.","url":"https://wccftech.com/dragons-dogma-ii-fans-believe-capcom-teasing-expansion/","source":"Alessio Palumbo","category":"ai","published_at":"2026-03-23T17:40:13","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://cdn.wccftech.com/wp-content/uploads/2026/03/dragons-dogma-2-anniversary-scaled.jpg","article_url":"https://wccftech.com/dragons-dogma-ii-fans-believe-capcom-teasing-expansion/"},{"id":39,"title":"Vivaldi's new feature should have every other browser taking note","summary":"For those who are looking for a browser UI that can be everything or nothing, look no further than the latest release of Vivaldi.","url":"https://www.zdnet.com/home-and-office/work-life/vivaldi-new-browser-feature/","source":"@ZDNET","category":"ai","published_at":"2026-03-23T17:35:30","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://www.zdnet.com/a/img/resize/4bcc60b619af96e0693cad385f0dab01b27671a9/2026/03/23/2965bbc9-d050-4d7f-b867-7f93a36c6d19/vivaldihidehero.jpg?auto=webp&fit=crop&height=675&width=1200","article_url":"https://www.zdnet.com/home-and-office/work-life/vivaldi-new-browser-feature/"},{"id":40,"title":"Pearl Abyss addresses Crimson Desert's Intel issues, but is it enough to save it?","summary":"After launching with no support for Intel Arc GPUs, Crimson Desert's devs say they're working on it, but it might be too little too late.","url":"https://www.pcgamesn.com/crimson-desert/intel-arc-support","source":"Edward Chester","category":"ai","published_at":"2026-03-23T17:33:32","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://www.pcgamesn.com/wp-content/sites/pcgamesn/2026/03/crimsom-desert-intel-arc-support.jpg","article_url":"https://www.pcgamesn.com/crimson-desert/intel-arc-support"},{"id":41,"title":"Notable Monday Option Activity: RCL, JBL, COIN","summary":"Jabil Inc (Symbol: JBL) saw options trading volume of 8,156 contracts, representing approximately 815,600 underlying shares or approximately 58.6% of JBL's average daily trading volume over the past month, of 1.4 million shares. Especially high volume was seen for the $300 strike call option expirin...","url":"https://www.nasdaq.com/articles/notable-monday-option-activity-rcl-jbl-coin","source":"BNK Invest","category":"ai","published_at":"2026-03-23T17:26:00","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://www.nasdaq.com/sites/acquia.prod/files/2019-05/0902-Q19%20Total%20Markets%20photos%20and%20gif_CC8.jpg","article_url":"https://www.nasdaq.com/articles/notable-monday-option-activity-rcl-jbl-coin"},{"id":42,"title":"Noteworthy Monday Option Activity: GE, FICO, KHC","summary":"Fair Isaac Corp (Symbol: FICO) saw options trading volume of 1,635 contracts, representing approximately 163,500 underlying shares or approximately 41.8% of FICO's average daily trading volume over the past month, of 390,955 shares. Especially high volume was seen for the $2800 strike call option ex...","url":"https://www.nasdaq.com/articles/noteworthy-monday-option-activity-ge-fico-khc","source":"BNK Invest","category":"ai","published_at":"2026-03-23T17:25:52","created_at":"2026-03-23T19:06:49.027494","language":"en","image_url":"https://www.nasdaq.com/sites/acquia.prod/files/2019-05/0902-Q19%20Total%20Markets%20photos%20and%20gif_CC8.jpg","article_url":"https://www.nasdaq.com/articles/noteworthy-monday-option-activity-ge-fico-khc"}]}</script>
+
+<!-- LOADING -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="spinner"></div>
+  <p>Fetching latest stories…</p>
+</div>
+
+<!-- ERROR BANNER -->
+<div class="error-banner" id="errorBanner"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Pul<span>se</span></div>
+  <nav id="headerNav">
+    <a href="#" class="active" data-filter="all">All</a>
+  </nav>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <div class="live-pill" id="livePill">
+      <span class="live-dot"></span>
+      <span id="livePillText">Live</span>
+    </div>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadArticles(true)">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="23 4 23 10 17 10"/>
+        <polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+      Refresh
+    </button>
+    <div class="date-line" id="todayDate"></div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero" id="heroSection"></section>
+
+<!-- FILTER BAR -->
+<div class="filter-bar" id="filterBar">
+  <span class="filter-label">Filter:</span>
+  <!-- filter buttons injected by JS -->
+  <span class="results-count" id="resultsCount"></span>
+  <div class="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input type="text" id="searchInput" placeholder="Search stories…" />
+  </div>
+</div>
+
+<!-- GRID -->
+<div class="section-label"><h2>Latest Stories</h2></div>
+<div class="grid" id="newsGrid"></div>
+
+<!-- MODAL -->
+<div class="overlay" id="overlay">
+  <div class="modal" id="modal"></div>
+</div>
 
 <script>
-const url = "https://lkgipryjekoyivaipnxs.supabase.co/rest/v1/articles?select=title,summary,source,published_at,image_url,article_url&category=eq.ai&language=eq.en&order=published_at.desc&limit=20";
+/* ================================================================
+   DATA STRATEGY
+   ----------------------------------------------------------------
+   PRIMARY  →  n8n injects a JSON array by replacing the token
+               __ARTICLES_JSON__ with the real array string,
+               then base64-encodes the whole file and pushes
+               it to GitHub Pages.
 
-fetch(url, {
-  headers: {
-   "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrZ2lwcnlqZWtveWl2YWlwbnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwOTY0NjUsImV4cCI6MjA4OTY3MjQ2NX0.I5UZPs3PTDtymPDVz5SthbCdzL9vTqjfGvwAEyCqm08",
-      "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrZ2lwcnlqZWtveWl2YWlwbnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwOTY0NjUsImV4cCI6MjA4OTY3MjQ2NX0.I5UZPs3PTDtymPDVz5SthbCdzL9vTqjfGvwAEyCqm08",
-      "Content-Type": "application/json"
+   FALLBACK →  If the placeholder is still unreplaced (e.g. the
+               page is opened locally or refresh is clicked),
+               the page fetches live rows from Supabase using the
+               keys set in the <head> config block.
+
+   FIELD MAP  (CurrentAPI — same as NewsAPI)
+   ----------------------------------------------------------------
+   title        → article.title
+   description  → article.description   (card summary)
+   image        → article.image         (or urlToImage / imageUrl)
+   url          → article.url           (read-more link)
+   source.name  → article.source.name   (or plain string)
+   publishedAt  → article.publishedAt   (or published_at)
+   category     → article.category      (or section / tag)
+================================================================ */
+
+  /* ── n8n PLACEHOLDER — read from <script id="n8n-data"> tag ── */
+  /* n8n replaces the text content of that tag with the JSON array */
+  const _n8nEl      = document.getElementById('n8n-data');
+  const _n8nRaw     = _n8nEl ? _n8nEl.textContent.trim() : '';
+  const N8N_PAYLOAD = _n8nRaw;
+  /* ──────────────────────────────────────────────────────────── */
+
+  let articles     = [];
+  let activeFilter = 'all';
+  let searchTerm   = '';
+
+  /* ── NORMALISE: map any CurrentAPI / NewsAPI shape to one object ── */
+  function normalise(raw, idx) {
+    const src = raw.source
+      ? (typeof raw.source === 'string' ? raw.source : (raw.source.name || ''))
+      : (raw.sourceName || raw.publisher || '');
+
+    return {
+      id:           idx,
+      title:        raw.title        || 'Untitled',
+      summary:      raw.description  || raw.summary  || raw.content || '',
+      image_url:    raw.image        || raw.image_url || raw.urlToImage || raw.imageUrl || '',
+      article_url:  raw.url          || raw.article_url || raw.link  || '#',
+      source:       src,
+      published_at: raw.publishedAt  || raw.published_at || raw.pubDate || new Date().toISOString(),
+      category:     raw.category     || raw.section  || raw.tag     || 'General',
+    };
   }
-})
-.then(res => res.json())
-.then(data => {
-  let html = "";
-  data.forEach(article => {
-    html += `
-      <div class="card">
-        <img src="${article.image_url}" />
-        <h2>${article.title}</h2>
-        <p>${article.summary}</p>
-        <p><b>${article.source}</b></p>
-        <a href="${article.article_url}" target="_blank">Read Full Article</a>
-      </div>
-    `;
-  });
-  document.getElementById("news").innerHTML = html;
-});
-</script>
 
+  /* ── SUPABASE LIVE FETCH ─────────────────────────────────────── */
+  async function fetchFromSupabase() {
+    const endpoint =
+      `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}` +
+      `?select=*&order=${SUPABASE_ORDER}.desc&limit=${SUPABASE_LIMIT}`;
+
+    const res = await fetch(endpoint, {
+      headers: {
+        'apikey':        SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type':  'application/json',
+      }
+    });
+    if (!res.ok) throw new Error(`Supabase ${res.status}: ${res.statusText}`);
+    return res.json();
+  }
+
+  /* ── MAIN LOADER ─────────────────────────────────────────────── */
+  async function loadArticles(forceSupabase = false) {
+    showLoading(true);
+    hideError();
+    setRefreshSpinning(true);
+
+    try {
+      let raw = [];
+      let dataSource = '';
+
+      /* 1 — try n8n-baked data (content of <script id="n8n-data">) */
+      if (!forceSupabase && N8N_PAYLOAD !== '' && N8N_PAYLOAD !== '[]') {
+        try {
+          const parsed = JSON.parse(N8N_PAYLOAD);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            raw = parsed;
+            dataSource = 'Built by n8n · ' + new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+          }
+        } catch (parseErr) {
+          console.warn('n8n JSON parse error — falling back to Supabase:', parseErr);
+        }
+      }
+
+      /* 2 — fall back to Supabase */
+      if (raw.length === 0) {
+        raw = await fetchFromSupabase();
+        dataSource = 'Live · ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+      }
+
+      articles = Array.isArray(raw) ? raw.map(normalise) : [];
+
+      if (articles.length === 0) {
+        showError('No articles found. Check your Supabase table or n8n workflow output.');
+      } else {
+        showLivePill(dataSource);
+      }
+
+      buildFilters();
+      renderHero();
+      renderGrid();
+
+    } catch (err) {
+      console.error('loadArticles error:', err);
+      showError('Could not load articles — ' + err.message +
+                '. Verify SUPABASE_URL and SUPABASE_ANON_KEY in the &lt;head&gt; config.');
+    } finally {
+      showLoading(false);
+      setRefreshSpinning(false);
+    }
+  }
+
+  /* ── BUILD FILTER BUTTONS from real categories ───────────────── */
+  function buildFilters() {
+    const cats = [...new Set(articles.map(a => a.category).filter(Boolean))].slice(0, 7);
+    const all  = [{ val:'all', lbl:'All' }, ...cats.map(c => ({ val:c, lbl:c }))];
+
+    /* header nav */
+    const nav = document.getElementById('headerNav');
+    nav.innerHTML = all.map(({ val, lbl }) =>
+      `<a href="#" class="${activeFilter===val?'active':''}" data-filter="${val}">${lbl}</a>`
+    ).join('');
+    nav.querySelectorAll('a').forEach(a =>
+      a.addEventListener('click', e => { e.preventDefault(); setFilter(a.dataset.filter); })
+    );
+
+    /* filter bar — insert before results-count span */
+    const bar   = document.getElementById('filterBar');
+    const count = document.getElementById('resultsCount');
+    bar.querySelectorAll('.filter-btn').forEach(b => b.remove());
+    all.forEach(({ val, lbl }) => {
+      const btn = document.createElement('button');
+      btn.className   = 'filter-btn' + (activeFilter === val ? ' active' : '');
+      btn.dataset.filter = val;
+      btn.textContent = lbl;
+      btn.addEventListener('click', () => setFilter(val));
+      bar.insertBefore(btn, count);
+    });
+  }
+
+  function setFilter(val) {
+    activeFilter = val;
+    document.querySelectorAll('.filter-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.filter === val));
+    document.querySelectorAll('#headerNav a').forEach(a =>
+      a.classList.toggle('active', a.dataset.filter === val));
+    renderGrid();
+  }
+
+  /* ── HERO ────────────────────────────────────────────────────── */
+  function renderHero() {
+    if (!articles.length) return;
+    const [feature, ...rest] = articles;
+    document.getElementById('heroSection').innerHTML = `
+      <div class="hero-feature" onclick="openModal(${feature.id})">
+        <img src="${esc(feature.image_url)}" alt="${esc(feature.title)}"
+             onerror="this.removeAttribute('src')" loading="lazy" />
+        <span class="tag">${esc(feature.category)}</span>
+        <h2>${esc(feature.title)}</h2>
+        <p>${esc(feature.summary)}</p>
+        <div class="meta">${esc(feature.source)} &nbsp;·&nbsp; ${fmtDate(feature.published_at)}</div>
+      </div>
+      <div class="hero-sidebar">
+        ${rest.slice(0, 4).map(a => `
+          <div class="side-item" onclick="openModal(${a.id})">
+            <img src="${esc(a.image_url)}" alt="${esc(a.title)}"
+                 onerror="this.removeAttribute('src')" loading="lazy" />
+            <div>
+              <h3>${esc(a.title)}</h3>
+              <div class="meta">${esc(a.source)} &nbsp;·&nbsp; ${fmtDate(a.published_at)}</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  /* ── GRID ────────────────────────────────────────────────────── */
+  function renderGrid() {
+    const grid     = document.getElementById('newsGrid');
+    const filtered = articles.filter(a => {
+      const mc = activeFilter === 'all' || a.category === activeFilter;
+      const ms = !searchTerm ||
+        a.title.toLowerCase().includes(searchTerm) ||
+        a.summary.toLowerCase().includes(searchTerm) ||
+        a.source.toLowerCase().includes(searchTerm);
+      return mc && ms;
+    });
+
+    document.getElementById('resultsCount').textContent =
+      filtered.length === articles.length
+        ? `${articles.length} stories`
+        : `${filtered.length} of ${articles.length} stories`;
+
+    if (!filtered.length) {
+      grid.innerHTML = `<div class="no-results">No stories match.
+        <span>Try clearing your search or selecting a different category.</span></div>`;
+      return;
+    }
+
+    grid.innerHTML = filtered.map((a, i) => `
+      <div class="card" style="animation-delay:${i * 0.06}s" onclick="openModal(${a.id})">
+        <div class="card-img-wrap">
+          <img src="${esc(a.image_url)}" alt="${esc(a.title)}"
+               onerror="this.removeAttribute('src')" loading="lazy" />
+        </div>
+        <div class="card-body">
+          <div class="card-tag">${esc(a.category)}</div>
+          <h3>${esc(a.title)}</h3>
+          <p>${esc(a.summary)}</p>
+          <div class="card-footer">
+            <span class="meta">${esc(a.source)} · ${fmtDate(a.published_at)}</span>
+            <a class="read-link" href="${esc(a.article_url)}" target="_blank" rel="noopener"
+               onclick="event.stopPropagation()">
+              Read
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="5" y1="12" x2="19" y2="12"/>
+                <polyline points="12 5 19 12 12 19"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+      </div>`).join('');
+  }
+
+  /* ── MODAL ───────────────────────────────────────────────────── */
+  function openModal(id) {
+    const a = articles.find(x => x.id === id);
+    if (!a) return;
+    document.getElementById('modal').innerHTML = `
+      <img src="${esc(a.image_url)}" alt="${esc(a.title)}"
+           onerror="this.removeAttribute('src')" />
+      <div class="modal-body">
+        <span class="tag">${esc(a.category)}</span>
+        <h2>${esc(a.title)}</h2>
+        <div class="meta">${esc(a.source)} &nbsp;·&nbsp; ${fmtDate(a.published_at)}</div>
+        <p>${esc(a.summary)}</p>
+        <div class="modal-actions">
+          <a class="btn-primary" href="${esc(a.article_url)}" target="_blank" rel="noopener">
+            Read Full Article →
+          </a>
+          <button class="btn-close" onclick="closeModal()">Close</button>
+        </div>
+      </div>`;
+    document.getElementById('overlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    document.getElementById('overlay').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('overlay')) closeModal();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  /* ── SEARCH ──────────────────────────────────────────────────── */
+  document.getElementById('searchInput').addEventListener('input', e => {
+    searchTerm = e.target.value.trim().toLowerCase();
+    renderGrid();
+  });
+
+  /* ── UI HELPERS ──────────────────────────────────────────────── */
+  function showLoading(on) {
+    document.getElementById('loadingScreen').classList.toggle('hidden', !on);
+  }
+  function showError(msg) {
+    const el = document.getElementById('errorBanner');
+    el.innerHTML = '⚠ ' + msg;
+    el.classList.add('show');
+  }
+  function hideError() {
+    document.getElementById('errorBanner').classList.remove('show');
+  }
+  function showLivePill(text) {
+    const el = document.getElementById('livePill');
+    document.getElementById('livePillText').textContent = text;
+    el.style.display = 'flex';
+  }
+  function setRefreshSpinning(on) {
+    document.getElementById('refreshBtn').classList.toggle('spinning', on);
+  }
+
+  /* ── XSS GUARD ───────────────────────────────────────────────── */
+  function esc(str) {
+    return String(str || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ── DATE FORMAT ─────────────────────────────────────────────── */
+  function fmtDate(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+    catch { return iso; }
+  }
+
+  /* ── BOOT ────────────────────────────────────────────────────── */
+  document.getElementById('todayDate').textContent =
+    new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+
+  loadArticles();
+</script>
 </body>
 </html>
