@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AI News</title>
+  <style>
+    body { font-family: Arial; background:#f5f5f5; }
+    .card {
+      background:white;
+      padding:15px;
+      margin:15px;
+      border-radius:10px;
+      box-shadow:0 2px 5px rgba(0,0,0,0.1);
+    }
+    img { width:100%; border-radius:10px; }
+    a { text-decoration:none; color:black; font-weight:bold; }
+  </style>
+</head>
+<body>
+
+<div id="news"></div>
+
+<script>
+const url = "https://lkgipryjekoyivaipnxs.supabase.co/rest/v1/articles?select=title,summary,source,published_at,image_url,article_url&category=eq.ai&language=eq.en&order=published_at.desc&limit=20";
+
+fetch(url, {
+  headers: {
+   "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrZ2lwcnlqZWtveWl2YWlwbnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwOTY0NjUsImV4cCI6MjA4OTY3MjQ2NX0.I5UZPs3PTDtymPDVz5SthbCdzL9vTqjfGvwAEyCqm08",
+      "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrZ2lwcnlqZWtveWl2YWlwbnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwOTY0NjUsImV4cCI6MjA4OTY3MjQ2NX0.I5UZPs3PTDtymPDVz5SthbCdzL9vTqjfGvwAEyCqm08",
+      "Content-Type": "application/json"
+  }
+})
+.then(res => res.json())
+.then(data => {
+  let html = "";
+  data.forEach(article => {
+    html += `
+      <div class="card">
+        <img src="${article.image_url}" />
+        <h2>${article.title}</h2>
+        <p>${article.summary}</p>
+        <p><b>${article.source}</b></p>
+        <a href="${article.article_url}" target="_blank">Read Full Article</a>
+      </div>
+    `;
+  });
+  document.getElementById("news").innerHTML = html;
+});
+</script>
+
+</body>
+</html>
